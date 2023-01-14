@@ -12,7 +12,7 @@ use tokio::{
 };
 
 use self::config::LspConfig;
-use tracing::{debug, error};
+use tracing::{debug, info, trace};
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 
 mod config;
@@ -27,6 +27,7 @@ where
     loop {
         let mut line = String::new();
         reader.read_line(&mut line).await?;
+        trace!("read line: {}", line);
         if let Some(content) = line.strip_prefix("Content-Length: ") {
             content_length = content
                 .trim()
@@ -52,6 +53,7 @@ where
     let content_length = read_content_length(reader).await?;
     let mut body = vec![0u8; content_length];
     reader.read_exact(&mut body).await.unwrap();
+    trace!("read body: {}", String::from_utf8_lossy(&body));
     serde_json::from_slice(&body).context("Failed to parse input as LSP data")
 }
 
@@ -68,9 +70,7 @@ async fn proxy_stdin(mut stdin: ChildStdin, mut input: broadcast::Receiver<Strin
 async fn proxy_stdout(mut stdout: BufReader<ChildStdout>, tx: mpsc::Sender<Value>) {
     loop {
         let message = read_message(&mut stdout).await.unwrap();
-        if let Err(_) = tx.send(message).await {
-            error!("send error, receiver dropped");
-        }
+        tx.send(message).await.unwrap();
     }
 }
 
@@ -101,6 +101,8 @@ async fn run(config: LspConfig) -> Result<()> {
         let mut child = cmd
             .spawn()
             .with_context(|| format!("Failed to spawn {} binary.", &lang.command.display()))?;
+        info!("spawned {}", lang.command.display());
+
         let child_stdin = child.stdin.take().unwrap();
         let child_stdout = BufReader::new(child.stdout.take().unwrap());
 
@@ -123,6 +125,7 @@ async fn run(config: LspConfig) -> Result<()> {
             for rx in &mut child_rxs {
                 if let Some(value) = rx.recv().await {
                     let message = serde_json::to_string(&value).unwrap();
+                    debug!("received: {}", message);
                     stdout
                         .write_all(format!("Content-Length: {}\r\n\r\n", message.len()).as_bytes())
                         .await

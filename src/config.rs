@@ -5,6 +5,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct LspConfig {
+    pub log_file: Option<PathBuf>,
     #[serde(rename = "language")]
     pub languages: Vec<Language>,
 }

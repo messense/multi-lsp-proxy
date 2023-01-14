@@ -7,11 +7,13 @@ use clap::Parser;
 use serde_json::Value;
 use tokio::{
     io::{self, AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    process::{Child, Command},
-    sync::{mpsc, oneshot},
+    process::{ChildStdin, ChildStdout, Command},
+    sync::{broadcast, mpsc},
 };
 
 use self::config::LspConfig;
+use tracing::{debug, error};
+use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 
 mod config;
 
@@ -53,65 +55,101 @@ where
     serde_json::from_slice(&body).context("Failed to parse input as LSP data")
 }
 
-async fn proxy(mut child: Child, mut input: mpsc::Receiver<(String, oneshot::Sender<Value>)>) {
-    let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
-    while let Some((message, tx)) = input.recv().await {
+async fn proxy_stdin(mut stdin: ChildStdin, mut input: broadcast::Receiver<String>) {
+    while let Ok(message) = input.recv().await {
         stdin
             .write_all(format!("Content-Length: {}\r\n\r\n", message.len()).as_bytes())
             .await
             .unwrap();
         stdin.write_all(message.as_bytes()).await.unwrap();
-        let resp = read_message(&mut stdout).await.unwrap();
-        tx.send(resp).unwrap();
+    }
+}
+
+async fn proxy_stdout(mut stdout: BufReader<ChildStdout>, tx: mpsc::Sender<Value>) {
+    loop {
+        let message = read_message(&mut stdout).await.unwrap();
+        if let Err(_) = tx.send(message).await {
+            error!("send error, receiver dropped");
+        }
     }
 }
 
 async fn run(config: LspConfig) -> Result<()> {
-    let mut child_txs = Vec::with_capacity(config.languages.len());
+    // setup tracing
+    if let Some(log_file) = config.log_file.as_ref() {
+        let directory = log_file.parent().unwrap();
+        let file_name = log_file.file_name().unwrap();
+        let file_appender = tracing_appender::rolling::never(directory, file_name);
+        let env_filter = EnvFilter::builder()
+            .with_default_directive(LevelFilter::DEBUG.into())
+            .from_env_lossy();
+        tracing_subscriber::fmt()
+            .with_writer(file_appender)
+            .with_env_filter(env_filter)
+            .init();
+    }
+
+    let (tx, _rx) = broadcast::channel(100);
+    let mut child_processes = Vec::new();
+    let mut child_rxs = Vec::with_capacity(config.languages.len());
     for lang in &config.languages {
         // spawn LSP server command
         let mut cmd = Command::new(&lang.command);
         cmd.args(&lang.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped());
-        let child = cmd
+        let mut child = cmd
             .spawn()
             .with_context(|| format!("Failed to spawn {} binary.", &lang.command.display()))?;
+        let child_stdin = child.stdin.take().unwrap();
+        let child_stdout = BufReader::new(child.stdout.take().unwrap());
 
-        let (tx, rx) = mpsc::channel(100);
-        child_txs.push(tx);
+        let (child_tx, child_rx) = mpsc::channel(100);
+        child_rxs.push(child_rx);
+
+        let rx = tx.subscribe();
         tokio::spawn(async move {
-            proxy(child, rx).await;
+            proxy_stdin(child_stdin, rx).await;
         });
+        tokio::spawn(async move { proxy_stdout(child_stdout, child_tx).await });
+
+        // Keep child process alive
+        child_processes.push(child);
     }
 
-    let mut stdin = BufReader::new(io::stdin());
-    let mut stdout = io::stdout();
+    tokio::spawn(async move {
+        let mut stdout = io::stdout();
+        loop {
+            for rx in &mut child_rxs {
+                if let Some(value) = rx.recv().await {
+                    let message = serde_json::to_string(&value).unwrap();
+                    stdout
+                        .write_all(format!("Content-Length: {}\r\n\r\n", message.len()).as_bytes())
+                        .await
+                        .unwrap();
+                    stdout.write_all(message.as_bytes()).await.unwrap();
+                }
+            }
+        }
+    });
+
     // LSP server main loop
     // Read new command, send to all child LSP servers
     // and merge responses
+    let mut stdin = BufReader::new(io::stdin());
     loop {
         let content_length = read_content_length(&mut stdin).await?;
         let mut body = vec![0u8; content_length];
         stdin.read_exact(&mut body).await.unwrap();
         let raw = String::from_utf8(body)?;
-        for tx in &mut child_txs {
-            let (resp_tx, resp_rx) = oneshot::channel();
-            tx.send((raw.clone(), resp_tx)).await.unwrap();
-
-            let res = resp_rx.await.unwrap();
-            let message = serde_json::to_string(&res).unwrap();
-            stdout
-                .write_all(format!("Content-Length: {}\r\n\r\n", message.len()).as_bytes())
-                .await
-                .unwrap();
-            stdout.write_all(message.as_bytes()).await.unwrap();
-        }
+        // let request: Request = serde_json::from_str(&raw).unwrap();
+        debug!(request = %raw, "incoming lsp request");
+        tx.send(raw.clone()).unwrap();
     }
 }
 
 #[derive(Debug, Parser)]
+#[command(version)]
 struct Cli {
     /// configuration file path
     #[arg(short = 'c', long, default_value = "config.toml")]

@@ -2,6 +2,10 @@
 name = "multi-lsp-proxy"
 version = "0.1.0"
 edition = "2021"
+description = "A LSP Proxy to multiple language servers"
+license = "MIT"
+repository = "https://github.com/messense/multi-lsp-proxy.git"
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

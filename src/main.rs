@@ -75,16 +75,21 @@ async fn proxy_stdout(mut stdout: BufReader<ChildStdout>, tx: mpsc::Sender<Value
 }
 
 async fn run(config: LspConfig) -> Result<()> {
-    // setup tracing
+    // keep tracing_appender guard alive
+    let mut _tracing_guard = None;
     if let Some(log_file) = config.log_file.as_ref() {
+        // setup tracing
         let directory = log_file.parent().unwrap();
         let file_name = log_file.file_name().unwrap();
         let file_appender = tracing_appender::rolling::never(directory, file_name);
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        _tracing_guard = Some(guard);
+
         let env_filter = EnvFilter::builder()
             .with_default_directive(LevelFilter::DEBUG.into())
             .from_env_lossy();
         tracing_subscriber::fmt()
-            .with_writer(file_appender)
+            .with_writer(non_blocking)
             .with_env_filter(env_filter)
             .init();
     }
@@ -119,6 +124,7 @@ async fn run(config: LspConfig) -> Result<()> {
         child_processes.push(child);
     }
 
+    // read messages from child LSPs
     tokio::spawn(async move {
         let mut stdout = io::stdout();
         loop {
@@ -138,14 +144,13 @@ async fn run(config: LspConfig) -> Result<()> {
 
     // LSP server main loop
     // Read new command, send to all child LSP servers
-    // and merge responses
+    // and TODO: merge responses
     let mut stdin = BufReader::new(io::stdin());
     loop {
         let content_length = read_content_length(&mut stdin).await?;
         let mut body = vec![0u8; content_length];
         stdin.read_exact(&mut body).await.unwrap();
         let raw = String::from_utf8(body)?;
-        // let request: Request = serde_json::from_str(&raw).unwrap();
         debug!(request = %raw, "incoming lsp request");
         tx.send(raw.clone()).unwrap();
     }

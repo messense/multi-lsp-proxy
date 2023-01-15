@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::process::Stdio;
 
 use anyhow::{bail, Context, Result};
@@ -10,6 +11,7 @@ use tokio::{
     process::{ChildStdin, ChildStdout, Command},
     sync::{broadcast, mpsc},
 };
+use tokio_stream::{Stream, StreamExt, StreamMap};
 use tracing::{debug, info, trace};
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 
@@ -125,18 +127,23 @@ async fn run(config: LspConfig) -> Result<()> {
     // read messages from child LSPs
     tokio::spawn(async move {
         let mut stdout = io::stdout();
-        loop {
-            for rx in &mut child_rxs {
-                if let Some(value) = rx.recv().await {
-                    let message = serde_json::to_string(&value).unwrap();
-                    debug!("received: {}", message);
-                    stdout
-                        .write_all(format!("Content-Length: {}\r\n\r\n", message.len()).as_bytes())
-                        .await
-                        .unwrap();
-                    stdout.write_all(message.as_bytes()).await.unwrap();
+        let mut map = StreamMap::new();
+        for (key, mut rx) in child_rxs.into_iter().enumerate() {
+            let stream = Box::pin(async_stream::stream! {
+                while let Some(value) = rx.recv().await {
+                    yield value;
                 }
-            }
+            }) as Pin<Box<dyn Stream<Item = Value> + Send>>;
+            map.insert(key, stream);
+        }
+        while let Some((_, value)) = map.next().await {
+            let message = serde_json::to_string(&value).unwrap();
+            debug!("received: {}", message);
+            stdout
+                .write_all(format!("Content-Length: {}\r\n\r\n", message.len()).as_bytes())
+                .await
+                .unwrap();
+            stdout.write_all(message.as_bytes()).await.unwrap();
         }
     });
 

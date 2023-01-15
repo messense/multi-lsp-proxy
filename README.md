@@ -3,10 +3,18 @@
 [![GitHub Actions](https://github.com/messense/multi-lsp-proxy/workflows/CI/badge.svg)](https://github.com/messense/multi-lsp-proxy/actions?query=workflow%3ACI)
 [![PyPI](https://img.shields.io/pypi/v/multi-lsp-proxy.svg)](https://pypi.org/project/multi-lsp-proxy)
 
-A **barely working** LSP Proxy to multiple language servers, to use multiple LSP with one programming language in
-editors that doesn't support multiple LSP natively like Helix (version 22.12).
+A **barely working** LSP Proxy to multiple language servers, to use multiple LSPs per language in
+editors that doesn't support multiple LSPs per language natively like Helix (version 22.12).
 
 ## Installation
+
+Install with [pipx](https://github.com/pypa/pipx/) is recommended:
+
+```bash
+pipx install multi-lsp-proxy
+```
+
+Pip also works:
 
 ```bash
 pip install multi-lsp-proxy

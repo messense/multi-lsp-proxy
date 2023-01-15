@@ -125,6 +125,7 @@ async fn run(config: LspConfig) -> Result<()> {
     }
 
     // read messages from child LSPs
+    // TODO: merge server capabilities?
     tokio::spawn(async move {
         let mut stdout = io::stdout();
         let mut map = StreamMap::new();
@@ -149,7 +150,6 @@ async fn run(config: LspConfig) -> Result<()> {
 
     // LSP server main loop
     // Read new command, send to all child LSP servers
-    // and TODO: merge responses
     let mut stdin = BufReader::new(io::stdin());
     loop {
         let content_length = read_content_length(&mut stdin).await?;

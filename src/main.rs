@@ -154,16 +154,29 @@ async fn run(config: LspConfig) -> Result<()> {
 #[derive(Debug, Parser)]
 #[command(version)]
 struct Cli {
-    /// configuration file path
-    #[arg(short = 'c', long, default_value = "config.toml")]
+    /// Configuration file path
+    #[arg(short = 'c', long)]
     config: PathBuf,
+    /// Select language servers by programming language name
+    #[arg(short = 'l', long)]
+    language: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let config_content = fs::read_to_string(&cli.config)?;
-    let lsp_config: LspConfig = toml_edit::easy::from_str(&config_content)?;
+    let mut lsp_config: LspConfig = toml_edit::easy::from_str(&config_content)?;
+    if let Some(lang) = cli.language.as_deref() {
+        lsp_config.languages.retain(|l| l.name == lang);
+    }
+    if lsp_config.languages.is_empty() {
+        if let Some(lang) = cli.language.as_deref() {
+            bail!("No language server found for {}.", lang);
+        } else {
+            bail!("No language server found.");
+        }
+    }
     run(lsp_config).await?;
     Ok(())
 }

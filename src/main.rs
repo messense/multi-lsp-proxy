@@ -6,7 +6,7 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use serde_json::Value;
 use tokio::{
-    io::{self, AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{self, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{ChildStdin, ChildStdout, Command},
     sync::{broadcast, mpsc},
 };
@@ -19,7 +19,6 @@ mod config;
 
 async fn read_content_length<T>(reader: &mut BufReader<T>) -> Result<usize>
 where
-    BufReader<T>: AsyncBufRead,
     BufReader<T>: AsyncBufReadExt,
     T: Unpin,
 {
@@ -46,7 +45,6 @@ where
 
 async fn read_message<T>(reader: &mut BufReader<T>) -> Result<Value>
 where
-    BufReader<T>: AsyncBufRead,
     BufReader<T>: AsyncBufReadExt,
     T: Unpin,
 {
@@ -178,9 +176,8 @@ async fn main() -> Result<()> {
     if lsp_config.languages.is_empty() {
         if let Some(lang) = cli.language.as_deref() {
             bail!("No language server found for {}.", lang);
-        } else {
-            bail!("No language server found.");
         }
+        bail!("No language server found.");
     }
     run(lsp_config).await?;
     Ok(())

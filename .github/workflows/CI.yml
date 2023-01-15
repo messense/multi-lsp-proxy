@@ -38,6 +38,7 @@ jobs:
         platform:
           - os: ubuntu-latest
             target: x86_64
+            maturin-args: --sdist
           - os: ubuntu-latest
             target: i686
           - os: ubuntu-latest
@@ -55,7 +56,7 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           manylinux: auto
-          args: -b bin --release -o dist
+          args: -b bin --release -o dist ${{ matrix.platform.maturin-args || '' }}
       - name: Upload wheel artifacts
         uses: actions/upload-artifact@v3
         with:

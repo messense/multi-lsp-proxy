@@ -2,6 +2,7 @@
 
 [![GitHub Actions](https://github.com/messense/multi-lsp-proxy/workflows/CI/badge.svg)](https://github.com/messense/multi-lsp-proxy/actions?query=workflow%3ACI)
 [![PyPI](https://img.shields.io/pypi/v/multi-lsp-proxy.svg)](https://pypi.org/project/multi-lsp-proxy)
+[![Crates.io](https://img.shields.io/crates/v/multi-lsp-proxy.svg?logo=rust)](https://crates.io/crates/multi-lsp-proxy)
 
 A **barely working** LSP Proxy to multiple language servers, to use multiple LSPs per language in
 editors that doesn't support multiple LSPs per language natively like Helix (version 22.12).

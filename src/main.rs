@@ -10,10 +10,10 @@ use tokio::{
     process::{ChildStdin, ChildStdout, Command},
     sync::{broadcast, mpsc},
 };
-
-use self::config::LspConfig;
 use tracing::{debug, info, trace};
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
+
+use self::config::LspConfig;
 
 mod config;
 

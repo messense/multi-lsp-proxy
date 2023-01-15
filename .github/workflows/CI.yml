@@ -1,0 +1,102 @@
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+name: CI
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+
+  build:
+    name: Build on ${{ matrix.platform.os }} for ${{ matrix.platform.target }}
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os: ubuntu-latest
+            target: x86_64
+          - os: ubuntu-latest
+            target: i686
+          - os: ubuntu-latest
+            target: aarch64
+          - os: macos-latest
+            target: x86_64
+          - os: macos-latest
+            target: aarch64
+          - os: windows-latest
+            target: x86_64
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          manylinux: auto
+          args: -b bin --release -o dist
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheels
+          path: dist
+
+  release-pypi:
+    permissions:
+      # Used to sign the release's artifacts with sigstore-python.
+      id-token: write
+      # Used to upload release artifacts.
+      contents: write
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    if: "startsWith(github.ref, 'refs/tags/')"
+    needs: build
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: wheels
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Publish
+        env:
+          MATURIN_PASSWORD: ${{ secrets.MATURIN_PASSWORD }}
+        run: |
+          set -ex
+          pip install maturin
+          maturin upload -u __token__ --skip-existing *
+      - name: Sigstore Sign
+        uses: sigstore/gh-action-sigstore-python@v0.0.11
+        with:
+          inputs: ./*.whl
+          upload-signing-artifacts: true
+      - name: Release signing artifacts
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            *.whl
+            *.sig
+            *.crt
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
+          generate_release_notes: true
